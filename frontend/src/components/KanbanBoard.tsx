@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import clsx from "clsx";
 import {
   DndContext,
   DragOverlay,
@@ -11,13 +12,24 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
+import { ChatSidebar } from "@/components/ChatSidebar";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
-import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
+import * as api from "@/lib/api";
+import { moveCard, type BoardData } from "@/lib/kanban";
 
-export const KanbanBoard = () => {
-  const [board, setBoard] = useState<BoardData>(() => initialData);
+type KanbanBoardProps = {
+  onLogout: () => void;
+};
+
+export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
+  const [board, setBoard] = useState<BoardData | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  // Open by default except on phone-sized screens, where it would cover the board.
+  const [isChatOpen, setIsChatOpen] = useState(
+    () => window.matchMedia("(min-width: 640px)").matches
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -25,7 +37,30 @@ export const KanbanBoard = () => {
     })
   );
 
-  const cardsById = useMemo(() => board.cards, [board.cards]);
+  // Applies the board returned by the API; on failure the user is asked to reload.
+  const save = async (request: Promise<BoardData>) => {
+    try {
+      setBoard(await request);
+      setError(null);
+    } catch {
+      setError("Could not save your change. Reload the page to see the latest board.");
+    }
+  };
+
+  useEffect(() => {
+    api
+      .getBoard()
+      .then(setBoard)
+      .catch(() => setError("Could not load the board. Try reloading the page."));
+  }, []);
+
+  if (!board) {
+    return error ? (
+      <p role="alert" className="p-12 text-sm font-semibold text-[var(--secondary-purple)]">
+        {error}
+      </p>
+    ) : null;
+  }
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveCardId(event.active.id as string);
@@ -39,60 +74,29 @@ export const KanbanBoard = () => {
       return;
     }
 
-    setBoard((prev) => ({
-      ...prev,
-      columns: moveCard(prev.columns, active.id as string, over.id as string),
-    }));
+    // Move locally first so the drop feels instant, then persist the new position.
+    const cardId = active.id as string;
+    const columns = moveCard(board.columns, cardId, over.id as string);
+    const column = columns.find((c) => c.cardIds.includes(cardId))!;
+    setBoard({ ...board, columns });
+    save(api.moveCard(cardId, column.id, column.cardIds.indexOf(cardId)));
   };
 
-  const handleRenameColumn = (columnId: string, title: string) => {
-    setBoard((prev) => ({
-      ...prev,
-      columns: prev.columns.map((column) =>
-        column.id === columnId ? { ...column, title } : column
-      ),
-    }));
-  };
+  const handleRenameColumn = (columnId: string, title: string) =>
+    save(api.renameColumn(columnId, title));
 
-  const handleAddCard = (columnId: string, title: string, details: string) => {
-    const id = createId("card");
-    setBoard((prev) => ({
-      ...prev,
-      cards: {
-        ...prev.cards,
-        [id]: { id, title, details: details || "No details yet." },
-      },
-      columns: prev.columns.map((column) =>
-        column.id === columnId
-          ? { ...column, cardIds: [...column.cardIds, id] }
-          : column
-      ),
-    }));
-  };
+  const handleAddCard = (columnId: string, title: string, details: string) =>
+    save(api.createCard(columnId, title, details));
 
-  const handleDeleteCard = (columnId: string, cardId: string) => {
-    setBoard((prev) => {
-      return {
-        ...prev,
-        cards: Object.fromEntries(
-          Object.entries(prev.cards).filter(([id]) => id !== cardId)
-        ),
-        columns: prev.columns.map((column) =>
-          column.id === columnId
-            ? {
-                ...column,
-                cardIds: column.cardIds.filter((id) => id !== cardId),
-              }
-            : column
-        ),
-      };
-    });
-  };
+  const handleEditCard = (cardId: string, title: string, details: string) =>
+    save(api.updateCard(cardId, title, details));
 
-  const activeCard = activeCardId ? cardsById[activeCardId] : null;
+  const handleDeleteCard = (cardId: string) => save(api.deleteCard(cardId));
+
+  const activeCard = activeCardId ? board.cards[activeCardId] : null;
 
   return (
-    <div className="relative overflow-hidden">
+    <div className={clsx("relative overflow-hidden", isChatOpen && "sm:pr-[380px]")}>
       <div className="pointer-events-none absolute left-0 top-0 h-[420px] w-[420px] -translate-x-1/3 -translate-y-1/3 rounded-full bg-[radial-gradient(circle,_rgba(32,157,215,0.25)_0%,_rgba(32,157,215,0.05)_55%,_transparent_70%)]" />
       <div className="pointer-events-none absolute bottom-0 right-0 h-[520px] w-[520px] translate-x-1/4 translate-y-1/4 rounded-full bg-[radial-gradient(circle,_rgba(117,57,145,0.18)_0%,_rgba(117,57,145,0.05)_55%,_transparent_75%)]" />
 
@@ -111,13 +115,22 @@ export const KanbanBoard = () => {
                 and capture quick notes without getting buried in settings.
               </p>
             </div>
-            <div className="rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] px-5 py-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--gray-text)]">
-                Focus
-              </p>
-              <p className="mt-2 text-lg font-semibold text-[var(--primary-blue)]">
-                One board. Five columns. Zero clutter.
-              </p>
+            <div className="flex items-start gap-4">
+              <div className="rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] px-5 py-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--gray-text)]">
+                  Focus
+                </p>
+                <p className="mt-2 text-lg font-semibold text-[var(--primary-blue)]">
+                  One board. Five columns. Zero clutter.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onLogout}
+                className="rounded-full border border-[var(--stroke)] px-4 py-2 text-xs font-semibold uppercase tracking-wide text-[var(--gray-text)] transition hover:text-[var(--navy-dark)]"
+              >
+                Log out
+              </button>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-4">
@@ -133,13 +146,22 @@ export const KanbanBoard = () => {
           </div>
         </header>
 
+        {error && (
+          <p
+            role="alert"
+            className="rounded-2xl border border-[var(--secondary-purple)] bg-white px-5 py-3 text-sm font-semibold text-[var(--secondary-purple)]"
+          >
+            {error}
+          </p>
+        )}
+
         <DndContext
           sensors={sensors}
           collisionDetection={closestCorners}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
-          <section className="grid gap-6 lg:grid-cols-5">
+          <section className="grid auto-cols-[minmax(240px,1fr)] grid-flow-col gap-6 overflow-x-auto pb-2">
             {board.columns.map((column) => (
               <KanbanColumn
                 key={column.id}
@@ -148,6 +170,7 @@ export const KanbanBoard = () => {
                 onRename={handleRenameColumn}
                 onAddCard={handleAddCard}
                 onDeleteCard={handleDeleteCard}
+                onEditCard={handleEditCard}
               />
             ))}
           </section>
@@ -160,6 +183,7 @@ export const KanbanBoard = () => {
           </DragOverlay>
         </DndContext>
       </main>
+      <ChatSidebar isOpen={isChatOpen} onOpenChange={setIsChatOpen} onBoardChange={setBoard} />
     </div>
   );
 };

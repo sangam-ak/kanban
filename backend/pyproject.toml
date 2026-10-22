@@ -1,0 +1,19 @@
+[project]
+name = "pm-backend"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi",
+    "itsdangerous>=2.2.0",
+    "openai>=3.36.1",
+    "uvicorn[standard]",
+]
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.16.0",
+    "pytest",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

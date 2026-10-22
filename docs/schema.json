@@ -1,0 +1,53 @@
+{
+  "database": "sqlite",
+  "file": "data/app.db",
+  "tables": {
+    "users": {
+      "columns": {
+        "id": "INTEGER PRIMARY KEY",
+        "username": "TEXT NOT NULL UNIQUE",
+        "created_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
+      }
+    },
+    "boards": {
+      "columns": {
+        "id": "INTEGER PRIMARY KEY",
+        "user_id": "INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE",
+        "created_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
+      },
+      "notes": "UNIQUE user_id enforces one board per user for the MVP; drop UNIQUE to allow several."
+    },
+    "columns": {
+      "columns": {
+        "id": "INTEGER PRIMARY KEY",
+        "board_id": "INTEGER NOT NULL REFERENCES boards(id) ON DELETE CASCADE",
+        "title": "TEXT NOT NULL",
+        "position": "INTEGER NOT NULL"
+      },
+      "notes": "position is 0-based order of the column on the board."
+    },
+    "cards": {
+      "columns": {
+        "id": "INTEGER PRIMARY KEY",
+        "column_id": "INTEGER NOT NULL REFERENCES columns(id) ON DELETE CASCADE",
+        "title": "TEXT NOT NULL",
+        "details": "TEXT NOT NULL DEFAULT ''",
+        "position": "INTEGER NOT NULL"
+      },
+      "notes": "position is 0-based order of the card within its column, kept contiguous."
+    }
+  },
+  "api_shape": {
+    "description": "Board as returned by GET /api/board and sent to the AI. Matches the frontend BoardData type.",
+    "example": {
+      "columns": [
+        { "id": "col-1", "title": "Backlog", "cardIds": ["card-1", "card-2"] },
+        { "id": "col-2", "title": "Discovery", "cardIds": [] }
+      ],
+      "cards": {
+        "card-1": { "id": "card-1", "title": "Align roadmap themes", "details": "Draft quarterly themes." },
+        "card-2": { "id": "card-2", "title": "Gather customer signals", "details": "Review support tags." }
+      }
+    }
+  }
+}

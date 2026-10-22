@@ -13,3 +13,5 @@ npm run dev
 npm run test:unit
 npm run test:e2e
 ```
+
+E2E tests run against the Docker container on port 8000 (see the root README).
