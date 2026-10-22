@@ -7,7 +7,7 @@ FastAPI app managed with uv. Runs in Docker on port 8000.
 - `pyproject.toml` / `uv.lock` - dependencies (fastapi, uvicorn, itsdangerous for sessions, openai SDK for OpenRouter; dev group: pytest, httpx2)
 - `app/main.py` - FastAPI app: startup db init, session middleware, dependencies (`current_user`, `get_conn`, `current_board_id`), API routes under `/api`; serves `static/` at `/`
 - `app/db.py` - SQLite connection (`foreign_keys` on), schema, `init_db` (creates file/tables, seeds `user` once), `create_user` (user + demo board)
-- `app/board.py` - board operations scoped to a board id: `get_board`, `rename_column`, `create_card`, `update_card`, `move_card`, `delete_card`; raise `NotFound` (mapped to 404) for unknown or other-board ids. Shared by the API and (later) the AI
+- `app/board.py` - board operations scoped to a board id: `get_board`, `rename_column`, `create_card`, `update_card`, `move_card`, `delete_card`; raise `NotFound` (mapped to 404) for unknown or other-board ids. Shared by the API routes and the AI (`ai.apply_operations`)
 - `app/ai.py` - OpenRouter client (OpenAI SDK, `base_url=https://openrouter.ai/api/v1`, key from `OPENROUTER_API_KEY`), model `openai/gpt-oss-120b`, `max_tokens=4096`
   - `ask(prompt)` - plain text reply
   - `chat(messages)` - structured output `ChatResponse {message, operations}`; requests only providers that support structured outputs (`provider.require_parameters`)

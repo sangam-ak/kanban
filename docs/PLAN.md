@@ -145,7 +145,8 @@ Success criteria: real OpenRouter call works from inside the container.
 
 - [x] Pydantic models for the structured output:
   - `ChatResponse { message: str, operations: list[Operation] }`
-  - `Operation` is a discriminated union: `create_card(column_id, title, details)`, `update_card(card_id, title?, details?)`, `move_card(card_id, column_id, position)`, `delete_card(card_id)`, `rename_column(column_id, title)`
+  - `Operation` types: `create_card(column_id, title, details)`, `update_card(card_id, title?, details?)`, `move_card(card_id, column_id, position)`, `delete_card(card_id)`, `rename_column(column_id, title)`
+  - As built: one flat `Operation` model (`type` + nullable fields) instead of a union, because some OpenRouter providers decode unions wrongly in structured outputs; ops missing required fields are skipped. Requests set `max_tokens=4096` and only use providers that support structured outputs.
 - [x] `POST /api/chat` takes `{ message, history }`; builds system prompt with board JSON and instructions; calls the model with JSON schema response format; applies operations via the Part 6 service functions; returns `{ message, board }`
 - [x] Invalid operations (unknown ids) are skipped and do not fail the request
 
