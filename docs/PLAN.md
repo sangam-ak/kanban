@@ -169,3 +169,117 @@ Tests:
 - Manual: real AI creates, edits, and moves cards from chat.
 
 Success criteria: user can manage the board through chat and the UI refreshes automatically; all tests pass.
+
+---
+
+# Phase 2: Full project management app
+
+Worked on in a Ralph loop. Each iteration: pick the first unchecked item below, implement it with tests, run all suites (backend pytest, frontend lint + `tsc --noEmit` + Vitest, Playwright against a rebuilt container), update the affected AGENTS.md / DATABASE.md / schema.json, then check the item off. Do not start a new part while the previous part's tests fail.
+
+## Phase 2 decisions
+
+- Passwords hashed with standard library `hashlib.scrypt` (random salt, stored as `salt$hash`); no new auth dependency.
+- The seeded `user` / `password` account stays as the demo account (E2E tests rely on it).
+- Session stores the user id; `current_user` returns it. 401 if the user no longer exists.
+- Schema changes go through numbered migrations in `db.py` tracked with `PRAGMA user_version`, so an existing `data/app.db` upgrades on startup without data loss.
+- New boards get the default 5 columns and no cards; the demo board keeps its sample cards.
+- The selected board is client state (remembered in `localStorage`); no client routing (static export).
+- Every board-scoped route takes the board id in the path (`/api/boards/{board_id}/...`) and 404s for boards the user does not own.
+- Coverage gates: backend `pytest-cov` at 90% or more, frontend Vitest coverage at 80% or more of lines; enforced in config so the suites fail below them.
+
+## Part 11: Coverage baseline
+
+- [ ] Add `pytest-cov` to the backend dev group; `[tool.coverage]` config with `fail_under = 90`
+- [ ] Vitest coverage config (v8, thresholds 80% lines) and `npm run test:coverage`
+- [ ] Bring both suites up to the thresholds on the current code
+- [ ] Document the coverage commands in CLAUDE.md
+
+Success criteria: both coverage commands pass on the existing app.
+
+## Part 12: User management (backend)
+
+- [ ] Migration 1: `users.password_hash`; the existing `user` gets the hash of `password`
+- [ ] `backend/app/users.py`: `hash_password`, `verify_password`, `create_user`, `authenticate`, `change_password`, `delete_user`
+- [ ] Routes: `POST /api/register` (username 3-32 chars `[a-zA-Z0-9_-]`, password 8+ chars; 409 if taken; signs in), `POST /api/login` checks the database, `POST /api/account/password` (current + new), `DELETE /api/account` (requires password; cascades boards; clears session)
+- [ ] `GET /api/me` returns `{ id, username }`
+
+Tests:
+- Hashing round trip, wrong password, salts differ.
+- Register: success, duplicate 409, validation 422, signed in afterwards.
+- Login with a registered user; change password then old fails / new works; delete account removes the user's data and session.
+- Migration upgrades a Phase 1 database file (fixture built with the old schema) with data intact.
+- Users cannot see each other's boards.
+
+## Part 13: User management (frontend)
+
+- [ ] Login form gets a "Create account" mode (username, password, confirm) with validation messages
+- [ ] Header user menu: username, Account settings, Log out
+- [ ] Account settings dialog: change password, delete account (confirm with password)
+- [ ] `lib/api.ts` helpers for the new routes
+
+Tests:
+- Unit: register mode switch, mismatch error, 409 shown, change password success/error, delete account returns to login.
+- E2E: register a new `e2e_<timestamp>` user, sees a seeded board, logs out and back in, changes password, deletes account (cleanup).
+
+## Part 14: Multiple boards (backend)
+
+- [ ] Migration 2: drop the unique constraint on `boards.user_id` (table rebuild), add `boards.name` (existing boards named "My Board") and `boards.position`
+- [ ] `board.py`: `list_boards`, `create_board(name)` (default columns), `rename_board`, `delete_board`
+- [ ] Routes: `GET/POST /api/boards`, `PATCH/DELETE /api/boards/{id}`, and all board/column/card routes moved under `/api/boards/{board_id}/`; old single-board routes removed
+- [ ] `/api/chat` takes the board id and only touches that board
+- [ ] Registering creates the seeded demo board
+
+Tests:
+- CRUD for boards; ownership 404s on every board-scoped route; deleting a board cascades; a user can delete their last board and then create one.
+- AI ops applied to the requested board only; ids from another board are skipped.
+
+## Part 15: Multiple boards (frontend)
+
+- [ ] Board switcher in the header: list, select, create, rename, delete (with confirmation)
+- [ ] Selected board id remembered in `localStorage`; falls back to the first board
+- [ ] Empty state when the user has no boards
+- [ ] Chat history resets when switching boards
+
+Tests:
+- Unit: switching loads the other board; create/rename/delete call the right endpoints; empty state.
+- E2E: create an `E2E` board, add a card, switch away and back, card persists; rename; delete.
+
+## Part 16: Columns and card details
+
+- [ ] Add, delete (only if empty, else 409) and reorder columns (drag or left/right buttons)
+- [ ] Migration 3: cards get `priority` (`low`/`medium`/`high`, nullable), `due_date` (ISO date, nullable), `labels` (comma-separated text)
+- [ ] Card edit form covers the new fields; card shows priority badge, due date (red when overdue), labels
+- [ ] AI `Operation` gains the new fields and `create_column` / `delete_column` / `move_column`; system prompt updated
+
+Tests:
+- Backend: column CRUD and reorder positions stay contiguous; card fields validated (bad priority / date 422); AI applies new ops.
+- Unit: new fields render and save; overdue styling.
+- E2E: add a column, add a card with priority and due date, reload, values persist; delete the column after emptying it.
+
+## Part 17: Search and filter
+
+- [ ] Toolbar above the board: text search (title, details, labels), priority filter, "overdue only" toggle
+- [ ] Filtering is client-side over the loaded board; drag and drop disabled while a filter is active
+
+Tests:
+- Unit: pure `filterBoard` function in `lib/kanban.ts`; toolbar updates visible cards.
+- E2E: search narrows cards; clearing shows all.
+
+## Part 18: Activity and dashboard
+
+- [ ] Migration 4: `activity` table (board_id, user_id, action, summary, created_at); `board.py` records an entry for each mutation (including AI ones)
+- [ ] `GET /api/boards/{id}/activity` (latest 50)
+- [ ] Board summary strip: cards per column, overdue count, high-priority count; activity panel listing recent changes
+
+Tests:
+- Backend: each mutation writes one activity row; AI changes recorded; scoped to the board.
+- Unit and E2E: summary counts match the board; a new card appears in the activity panel.
+
+## Part 19: Final quality pass
+
+- [ ] Run `/code-review`-style self review of the whole Phase 2 diff; fix findings
+- [ ] Full suite green including real OpenRouter tests (`RUN_REAL_AI=1`) and a container restart persistence check
+- [ ] README, CLAUDE.md, AGENTS.md files, DATABASE.md and schema.json match the code
+- [ ] Update Business Requirements / Limitations in AGENTS.md to describe the new app
+
+Success criteria: all checklist items checked, all suites and coverage gates pass.
