@@ -37,4 +37,4 @@ Column order is the array order; card order is `cardIds` order. Ids come from th
 
 ## Notes
 
-- `npx tsc --noEmit` reports errors for test globals (`describe`, `expect`) in test files; this predates the project work. Vitest runs fine and `next build` passes.
+- `npx tsc --noEmit` type-checks app and test files. Test globals and jest-dom matchers are typed via `src/test/vitest.d.ts` (`vitest/globals`, `@testing-library/jest-dom/vitest`).

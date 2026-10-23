@@ -144,10 +144,47 @@ def test_invalid_operations_are_skipped(client, fake_model):
     )
     response = send(client)
     assert response.status_code == 200
+    assert response.json()["message"] == "Tried.\n\n(3 changes could not be applied.)"
     board = response.json()["board"]
     assert card_titles(board, "Backlog") == [
         "Align roadmap themes", "Gather customer signals", "Still added",
     ]
+
+
+def test_blank_titles_are_treated_as_missing(client, fake_model):
+    before = client.get("/api/board").json()
+    fake_model.response = ChatResponse(
+        message="Tried.",
+        operations=[
+            op("create_card", column_id="col-1", title="  ", details=""),
+            op("rename_column", column_id="col-1", title=""),
+            op("update_card", card_id="card-1", title=" ", details="New details"),
+        ],
+    )
+    response = send(client).json()
+    assert response["message"] == "Tried.\n\n(2 changes could not be applied.)"
+    board = response["board"]
+    assert board["columns"] == before["columns"]
+    assert board["cards"]["card-1"]["title"] == before["cards"]["card-1"]["title"]
+    assert board["cards"]["card-1"]["details"] == "New details"
+
+
+def test_one_skipped_operation_is_reported(client, fake_model):
+    fake_model.response = ChatResponse(
+        message="Deleted.", operations=[op("delete_card", card_id="card-999")]
+    )
+    assert send(client).json()["message"] == "Deleted.\n\n(1 change could not be applied.)"
+
+
+def test_unusable_reply_leaves_board_unchanged(client, fake_model):
+    before = client.get("/api/board").json()
+    fake_model.response = None
+    response = send(client)
+    assert response.status_code == 200
+    assert response.json() == {
+        "message": "Sorry, I could not process that. Please try again.",
+        "board": before,
+    }
 
 
 def test_operations_missing_required_fields_are_skipped(client, fake_model):

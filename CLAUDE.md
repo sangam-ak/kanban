@@ -42,9 +42,8 @@ npm run test:e2e                               # Playwright; needs the Docker co
 npx playwright test tests/kanban.spec.ts       # single spec
 RUN_REAL_AI=1 npm run test:e2e                 # include the real-AI chat test
 npm run build                                  # static export to out/
+npx tsc --noEmit                               # type-check, including test files
 ```
-
-`npx tsc --noEmit` reports errors for test globals in test files; this is known and not a regression.
 
 ## Architecture
 
@@ -54,7 +53,7 @@ Backend (`backend/app/`):
 - `main.py` - routes and FastAPI dependencies. `current_user` reads the signed session cookie (401 if absent), `get_conn` gives one SQLite connection per request wrapped in a transaction (commit on success, rollback on error), `current_board_id` resolves the user's single board. `board.NotFound` maps to 404.
 - `board.py` - all board mutations, scoped to a board id. Used by both the REST routes and the AI, so any new board operation belongs here.
 - `db.py` - schema and `init_db` (creates the db file and seeds the `user` account with a demo board on first start). `DB_PATH` is monkeypatched per test in `tests/conftest.py`.
-- `ai.py` - OpenRouter via the OpenAI SDK, model `openai/gpt-oss-120b`. `/api/chat` sends the board JSON + browser-held chat history + the new message; the model returns structured output `{message, operations}`; `apply_operations` applies them through `board.py` inside the request transaction, silently skipping invalid ops. `Operation` is deliberately one flat model with nullable fields (not a union) because some providers decode `anyOf` incorrectly; `max_tokens` is set because OpenRouter otherwise returns 402 on low balances.
+- `ai.py` - OpenRouter via the OpenAI SDK, model `openai/gpt-oss-120b`. `/api/chat` sends the board JSON + browser-held chat history + the new message; the model returns structured output `{message, operations}`; `apply_operations` applies them through `board.py` inside the request transaction, skipping invalid ops (the reply then says how many could not be applied). `chat` returns `None` for an unusable reply (refusal or token limit) and the route answers with a short apology. `Operation` is deliberately one flat model with nullable fields (not a union) because some providers decode `anyOf` incorrectly; `max_tokens` is set because OpenRouter otherwise returns 402 on low balances.
 
 Ids: the database uses integer ids; the API and AI see them as `col-<n>` and `card-<n>` (`board.parse_id` converts).
 

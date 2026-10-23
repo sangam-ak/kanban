@@ -1,7 +1,9 @@
 import os
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from openai import LengthFinishReasonError
 
 from app import ai
 from app.main import app
@@ -19,6 +21,15 @@ def test_ai_test_returns_reply(client, monkeypatch):
     assert response.status_code == 200
     assert response.json() == {"reply": "4"}
     assert prompts == ["What is 2+2?"]
+
+
+def test_chat_returns_none_when_output_is_cut_off(monkeypatch):
+    def parse(**kwargs):
+        raise LengthFinishReasonError(completion=SimpleNamespace(usage=None))
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)))
+    monkeypatch.setattr(ai, "client", lambda: fake_client)
+    assert ai.chat([{"role": "user", "content": "Hi"}]) is None
 
 
 @pytest.mark.skipif(not os.environ.get("OPENROUTER_API_KEY"), reason="OPENROUTER_API_KEY not set")

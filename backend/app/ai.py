@@ -3,7 +3,7 @@ import os
 import sqlite3
 from typing import Literal
 
-from openai import OpenAI
+from openai import ContentFilterFinishReasonError, LengthFinishReasonError, OpenAI
 from pydantic import BaseModel
 
 from app import board
@@ -78,15 +78,20 @@ def ask(prompt: str) -> str:
     return response.choices[0].message.content
 
 
-def chat(messages: list[dict]) -> ChatResponse:
-    response = client().chat.completions.parse(
-        model=MODEL,
-        messages=messages,
-        response_format=ChatResponse,
-        max_tokens=MAX_TOKENS,
-        # Only route to providers that support structured outputs.
-        extra_body={"provider": {"require_parameters": True}},
-    )
+def chat(messages: list[dict]) -> ChatResponse | None:
+    """Returns None when the model gives no usable reply (a refusal, or output cut off at
+    MAX_TOKENS, which also counts the model's reasoning tokens)."""
+    try:
+        response = client().chat.completions.parse(
+            model=MODEL,
+            messages=messages,
+            response_format=ChatResponse,
+            max_tokens=MAX_TOKENS,
+            # Only route to providers that support structured outputs.
+            extra_body={"provider": {"require_parameters": True}},
+        )
+    except (LengthFinishReasonError, ContentFilterFinishReasonError):
+        return None
     return response.choices[0].message.parsed
 
 
@@ -98,10 +103,18 @@ def build_messages(board_data: dict, history: list[dict], message: str) -> list[
     ]
 
 
-def apply_operations(conn: sqlite3.Connection, board_id: int, operations: list[Operation]) -> None:
-    """Apply each operation; ones missing required fields or using unknown ids are skipped."""
+def apply_operations(conn: sqlite3.Connection, board_id: int, operations: list[Operation]) -> int:
+    """Apply each operation; ones missing required fields or using unknown ids are skipped.
+
+    Returns the number of skipped operations.
+    """
+    skipped = 0
     for op in operations:
+        # A blank title counts as missing, as in the REST API.
+        if op.title is not None:
+            op.title = op.title.strip() or None
         if any(getattr(op, field) is None for field in REQUIRED_FIELDS[op.type]):
+            skipped += 1
             continue
         try:
             match op.type:
@@ -116,4 +129,5 @@ def apply_operations(conn: sqlite3.Connection, board_id: int, operations: list[O
                 case "rename_column":
                     board.rename_column(conn, board_id, op.column_id, op.title)
         except board.NotFound:
-            continue
+            skipped += 1
+    return skipped

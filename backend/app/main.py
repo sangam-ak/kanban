@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 from starlette.middleware.sessions import SessionMiddleware
 
 from app import ai, board, db
@@ -64,23 +64,26 @@ def current_board_id(username: Username, conn: Conn) -> int:
 BoardId = Annotated[int, Depends(current_board_id)]
 
 
+Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
 class Credentials(BaseModel):
     username: str
     password: str
 
 
 class ColumnRename(BaseModel):
-    title: str = Field(min_length=1)
+    title: Title
 
 
 class CardCreate(BaseModel):
     column_id: str
-    title: str = Field(min_length=1)
+    title: Title
     details: str = ""
 
 
 class CardUpdate(BaseModel):
-    title: str | None = Field(default=None, min_length=1)
+    title: Title | None = None
     details: str | None = None
 
 
@@ -171,8 +174,14 @@ def chat(body: ChatRequest, conn: Conn, board_id: BoardId):
         body.message,
     )
     response = ai.chat(messages)
-    ai.apply_operations(conn, board_id, response.operations)
-    return {"message": response.message, "board": board.get_board(conn, board_id)}
+    if response is None:
+        message = "Sorry, I could not process that. Please try again."
+    else:
+        message = response.message
+        skipped = ai.apply_operations(conn, board_id, response.operations)
+        if skipped:
+            message += f"\n\n({skipped} change{'s' if skipped > 1 else ''} could not be applied.)"
+    return {"message": message, "board": board.get_board(conn, board_id)}
 
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True, check_dir=False), name="static")

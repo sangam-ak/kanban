@@ -64,6 +64,23 @@ def test_rename_column_rejects_empty_title(client):
     assert client.patch("/api/columns/col-1", json={"title": ""}).status_code == 422
 
 
+@pytest.mark.parametrize(
+    "method, url, body",
+    [
+        ("patch", "/api/columns/col-1", {"title": "   "}),
+        ("post", "/api/cards", {"column_id": "col-1", "title": "   "}),
+        ("patch", "/api/cards/card-1", {"title": "   "}),
+    ],
+)
+def test_rejects_blank_titles(client, method, url, body):
+    assert client.request(method, url, json=body).status_code == 422
+
+
+def test_titles_are_trimmed(client):
+    board = client.patch("/api/columns/col-1", json={"title": "  Ideas  "}).json()
+    assert board["columns"][0]["title"] == "Ideas"
+
+
 def test_create_card_appends_to_column(client):
     col_id = column(client.get("/api/board").json(), "Backlog")["id"]
     response = client.post(
