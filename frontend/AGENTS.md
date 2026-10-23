@@ -1,6 +1,6 @@
 # Frontend
 
-Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4. Built as a static export (`output: "export"` -> `out/`) and served by the FastAPI backend in Docker. The board is loaded from and saved to the backend API.
+Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4, lucide-react icons. Built as a static export (`output: "export"` -> `out/`) and served by the FastAPI backend in Docker. The board is loaded from and saved to the backend API.
 
 ## Structure
 
@@ -11,10 +11,10 @@ Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4. Built as a static
 - `src/components/LoginForm.tsx` - username/password form posting to `/api/login`; shows an error on 401
 - `src/lib/api.ts` - typed fetch helpers for the board routes (each returns the full updated `BoardData`) and `chat(message, history)` (returns `{message, board}`); all throw on non-2xx
 - `src/lib/kanban.ts` - types (`Card`, `Column`, `BoardData`) and `moveCard` (pure reorder/move logic)
-- `src/components/KanbanBoard.tsx` - loads the board via `getBoard`; every change calls the API and replaces state with the returned board. Drag is optimistic (local `moveCard`, then `api.moveCard` with the card's new column and index). Shows an error banner if a load or save fails. Log out button in the header. Renders `ChatSidebar` and passes `setBoard` so AI changes show immediately; board scrolls horizontally (columns min 240px) and gets right padding while the sidebar is open
-- `src/components/ChatSidebar.tsx` - fixed right-hand AI chat panel (full width on phones, 380px otherwise); open by default except below 640px; stays mounted when closed so the conversation is kept. History lives in React state and is sent with each message; Enter sends, Shift+Enter adds a line
-- `src/components/KanbanColumn.tsx` - droppable column; title input keeps local state and saves on blur or Enter (empty title reverts); sortable card list, `NewCardForm`
-- `src/components/KanbanCard.tsx` - sortable card showing title, details (long words wrap), Edit and Remove buttons below the text; Edit switches to an inline form (drag attributes/listeners are removed while editing so the inputs stay usable)
+- `src/components/KanbanBoard.tsx` - loads the board via `getBoard`; every change calls the API and replaces state with the returned board. Drag is optimistic (local `moveCard`, then `api.moveCard` with the card's new column and index). Shows an error banner if a load or save fails. Full-viewport layout: a compact header (card count, Open assistant button while the chat is closed, Log out; icon-only below 640px) and a board that fills the remaining height. Columns share the width (min 190px, 85% wide with scroll snap on phones), scroll horizontally only when they do not fit, and each column scrolls its cards vertically. Renders `ChatSidebar` and passes `setBoard` so AI changes show immediately; the board gets right padding while the sidebar is open
+- `src/components/ChatSidebar.tsx` - fixed right-hand AI chat panel (full width on phones, 320px, 380px from 1536px); open by default except below 640px; renders nothing when closed but stays mounted so the conversation is kept (the open button lives in the board header). History lives in React state and is sent with each message; Enter sends, Shift+Enter adds a line
+- `src/components/KanbanColumn.tsx` - droppable column; title input and card count badge in the header; title input keeps local state and saves on blur or Enter (empty title reverts); sortable card list, `NewCardForm`
+- `src/components/KanbanCard.tsx` - sortable card showing title, details (long words wrap), edit (pencil) and delete (trash) icon buttons in the top-right corner, shown on hover/focus on devices that can hover and always on touch devices; Edit switches to an inline form (drag attributes/listeners are removed while editing so the inputs stay usable)
 - `src/components/KanbanCardPreview.tsx` - card rendered in the drag overlay
 - `src/components/NewCardForm.tsx` - toggled form to add a card (title required, details optional)
 - `src/test/boardData.ts` - demo board fixture for unit tests (mirrors the backend seed)

@@ -11,7 +11,12 @@ const mockedApi = vi.mocked(api);
 
 const Harness = ({ onBoardChange }: { onBoardChange: (board: BoardData) => void }) => {
   const [isOpen, setIsOpen] = useState(true);
-  return <ChatSidebar isOpen={isOpen} onOpenChange={setIsOpen} onBoardChange={onBoardChange} />;
+  return (
+    <>
+      {!isOpen && <button onClick={() => setIsOpen(true)}>Open assistant</button>}
+      <ChatSidebar isOpen={isOpen} onClose={() => setIsOpen(false)} onBoardChange={onBoardChange} />
+    </>
+  );
 };
 
 const renderSidebar = () => {
