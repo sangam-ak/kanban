@@ -2,23 +2,38 @@ import { useState } from "react";
 import clsx from "clsx";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import type { Card, Column } from "@/lib/kanban";
+import { ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
+import type { Card, CardChanges, Column } from "@/lib/kanban";
 import { KanbanCard } from "@/components/KanbanCard";
 import { NewCardForm } from "@/components/NewCardForm";
 
 type KanbanColumnProps = {
   column: Column;
   cards: Card[];
+  // Whether the column has no cards at all, even ones hidden by a filter.
+  isEmpty: boolean;
+  index: number;
+  columnCount: number;
   onRename: (columnId: string, title: string) => void;
+  onMove: (columnId: string, position: number) => void;
+  onDelete: (columnId: string) => void;
   onAddCard: (columnId: string, title: string, details: string) => void;
   onDeleteCard: (cardId: string) => void;
-  onEditCard: (cardId: string, title: string, details: string) => void;
+  onEditCard: (cardId: string, changes: CardChanges) => void;
 };
+
+const iconButtonClass =
+  "rounded-md p-1 text-[var(--gray-text)] transition hover:bg-[var(--surface)] hover:text-[var(--navy-dark)] disabled:pointer-events-none disabled:opacity-30";
 
 export const KanbanColumn = ({
   column,
   cards,
+  isEmpty,
+  index,
+  columnCount,
   onRename,
+  onMove,
+  onDelete,
   onAddCard,
   onDeleteCard,
   onEditCard,
@@ -66,6 +81,37 @@ export const KanbanColumn = ({
         >
           {cards.length}
         </span>
+      </div>
+      <div className="flex items-center gap-1 px-3 pb-1">
+        <button
+          type="button"
+          onClick={() => onMove(column.id, index - 1)}
+          disabled={index === 0}
+          aria-label={`Move ${column.title} left`}
+          className={iconButtonClass}
+        >
+          <ChevronLeft size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={() => onMove(column.id, index + 1)}
+          disabled={index === columnCount - 1}
+          aria-label={`Move ${column.title} right`}
+          className={iconButtonClass}
+        >
+          <ChevronRight size={14} />
+        </button>
+        {/* Only empty columns can be deleted, so the button only shows for them. */}
+        {isEmpty && (
+          <button
+            type="button"
+            onClick={() => onDelete(column.id)}
+            aria-label={`Delete ${column.title}`}
+            className={clsx(iconButtonClass, "ml-auto hover:text-[var(--secondary-purple)]")}
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-1">
         <SortableContext items={column.cardIds} strategy={verticalListSortingStrategy}>

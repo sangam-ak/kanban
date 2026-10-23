@@ -1,34 +1,31 @@
 import { expect, test, type Page } from "@playwright/test";
+import { boardUrl, deleteE2ECards, signIn, uniqueTitle } from "./helpers";
 
-const PREFIX = "E2E";
-const uniqueTitle = () => `${PREFIX} ${Date.now()}-${Math.round(Math.random() * 1e6)}`;
 
 const columns = (page: Page) => page.locator('[data-testid^="column-"]');
 const assistant = (page: Page) => page.getByRole("complementary", { name: "AI assistant" });
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/");
-  await page.getByLabel("Username").fill("user");
-  await page.getByLabel("Password").fill("password");
-  await page.getByRole("button", { name: /sign in/i }).click();
-  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+  await signIn(page);
 });
 
 test.afterEach(async ({ page }) => {
-  const board = await (await page.request.get("/api/board")).json();
-  for (const card of Object.values<{ id: string; title: string }>(board.cards)) {
-    if (card.title.startsWith(PREFIX)) {
-      await page.request.delete(`/api/cards/${card.id}`);
-    }
-  }
+  await deleteE2ECards(page);
 });
 
 test("board updates from the assistant's reply without a reload", async ({ page }) => {
   // Reply with the real board plus one extra card, without calling the AI.
   const title = uniqueTitle();
-  await page.route("/api/chat", async (route) => {
-    const board = await (await page.request.get("/api/board")).json();
-    board.cards["card-99999"] = { id: "card-99999", title, details: "" };
+  await page.route("**/api/boards/*/chat", async (route) => {
+    const board = await (await page.request.get(await boardUrl(page))).json();
+    board.cards["card-99999"] = {
+      id: "card-99999",
+      title,
+      details: "",
+      priority: null,
+      dueDate: null,
+      labels: [],
+    };
     board.columns[1].cardIds.push("card-99999");
     await route.fulfill({ json: { message: "Added the card.", board } });
   });
@@ -43,7 +40,7 @@ test("board updates from the assistant's reply without a reload", async ({ page 
 });
 
 test("shows an error when the assistant fails", async ({ page }) => {
-  await page.route("/api/chat", (route) => route.fulfill({ status: 500 }));
+  await page.route("**/api/boards/*/chat", (route) => route.fulfill({ status: 500 }));
   const chat = assistant(page);
   await chat.getByLabel("Message").fill("Hello");
   await chat.getByLabel("Message").press("Enter");

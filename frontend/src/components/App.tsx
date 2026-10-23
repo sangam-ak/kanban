@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { KanbanBoard } from "@/components/KanbanBoard";
 import { LoginForm } from "@/components/LoginForm";
+import { Workspace } from "@/components/Workspace";
 
 export const App = () => {
   // undefined while checking the session, null when signed out
@@ -25,5 +25,5 @@ export const App = () => {
   if (username === null) {
     return <LoginForm onLogin={setUsername} />;
   }
-  return <KanbanBoard onLogout={handleLogout} />;
+  return <Workspace username={username} onLogout={handleLogout} />;
 };

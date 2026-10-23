@@ -14,7 +14,12 @@ const Harness = ({ onBoardChange }: { onBoardChange: (board: BoardData) => void 
   return (
     <>
       {!isOpen && <button onClick={() => setIsOpen(true)}>Open assistant</button>}
-      <ChatSidebar isOpen={isOpen} onClose={() => setIsOpen(false)} onBoardChange={onBoardChange} />
+      <ChatSidebar
+        boardId="board-1"
+        isOpen={isOpen}
+        onClose={() => setIsOpen(false)}
+        onBoardChange={onBoardChange}
+      />
     </>
   );
 };
@@ -45,7 +50,7 @@ describe("ChatSidebar", () => {
 
     expect(screen.getByTestId("chat-user")).toHaveTextContent("Add a card");
     expect(await screen.findByTestId("chat-assistant")).toHaveTextContent("Added it.");
-    expect(mockedApi.chat).toHaveBeenCalledWith("Add a card", []);
+    expect(mockedApi.chat).toHaveBeenCalledWith("board-1", "Add a card", []);
     expect(onBoardChange).toHaveBeenCalledWith(boardData);
     expect(screen.getByLabelText("Message")).toHaveValue("");
   });
@@ -60,7 +65,7 @@ describe("ChatSidebar", () => {
     await type("Second{Enter}");
     await screen.findByText("Second reply");
 
-    expect(mockedApi.chat).toHaveBeenLastCalledWith("Second", [
+    expect(mockedApi.chat).toHaveBeenLastCalledWith("board-1", "Second", [
       { role: "user", content: "First" },
       { role: "assistant", content: "First reply" },
     ]);
@@ -73,7 +78,7 @@ describe("ChatSidebar", () => {
     expect(mockedApi.chat).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Message")).toHaveValue("Line one\nLine two");
     await type("{Enter}");
-    expect(mockedApi.chat).toHaveBeenCalledWith("Line one\nLine two", []);
+    expect(mockedApi.chat).toHaveBeenCalledWith("board-1", "Line one\nLine two", []);
   });
 
   it("shows a loading state and disables sending while waiting", async () => {

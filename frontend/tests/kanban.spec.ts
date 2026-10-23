@@ -1,10 +1,9 @@
 import { execSync } from "node:child_process";
 import { expect, test, type Page } from "@playwright/test";
+import { boardUrl, deleteE2ECards, signIn, uniqueTitle } from "./helpers";
 
 // These tests run against the real database. Each test works on its own "E2E" cards,
 // which are deleted afterwards, so the user's board is left as it was.
-const PREFIX = "E2E";
-const uniqueTitle = () => `${PREFIX} ${Date.now()}-${Math.round(Math.random() * 1e6)}`;
 
 const columns = (page: Page) => page.locator('[data-testid^="column-"]');
 const cardByTitle = (page: Page, title: string) =>
@@ -24,20 +23,11 @@ const addCard = async (page: Page, columnIndex: number, title: string) => {
 };
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/");
-  await page.getByLabel("Username").fill("user");
-  await page.getByLabel("Password").fill("password");
-  await page.getByRole("button", { name: /sign in/i }).click();
-  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+  await signIn(page);
 });
 
 test.afterEach(async ({ page }) => {
-  const board = await (await page.request.get("/api/board")).json();
-  for (const card of Object.values<{ id: string; title: string }>(board.cards)) {
-    if (card.title.startsWith(PREFIX)) {
-      await page.request.delete(`/api/cards/${card.id}`);
-    }
-  }
+  await deleteE2ECards(page);
 });
 
 test("loads the kanban board", async ({ page }) => {
@@ -87,11 +77,13 @@ test("renamed column persists after reload", async ({ page }) => {
 
   try {
     await input.fill(renamed);
-    await Promise.all([saved(page, `/api/columns/${columnId}`, "PATCH"), input.press("Enter")]);
+    await Promise.all([saved(page, `/columns/${columnId}`, "PATCH"), input.press("Enter")]);
     await page.reload();
     await expect(columns(page).nth(4).getByLabel("Column title")).toHaveValue(renamed);
   } finally {
-    await page.request.patch(`/api/columns/${columnId}`, { data: { title: original } });
+    await page.request.patch(`${await boardUrl(page)}/columns/${columnId}`, {
+      data: { title: original },
+    });
   }
 });
 
@@ -128,4 +120,30 @@ test("changes survive a container restart", async ({ page }) => {
 
   await page.reload();
   await expect(columns(page).nth(2).getByText(title)).toBeVisible();
+});
+
+test("search narrows the cards and clearing shows them all", async ({ page }) => {
+  const title = uniqueTitle();
+  await addCard(page, 0, title);
+  const cards = page.locator('[data-testid^="card-"]');
+  const total = await cards.count();
+
+  await page.getByLabel("Search cards").fill(title);
+  await expect(cards).toHaveCount(1);
+  await expect(cardByTitle(page, title)).toBeVisible();
+
+  await page.getByRole("button", { name: /clear filters/i }).click();
+  await expect(cards).toHaveCount(total);
+});
+
+test("summary counts the cards and activity lists a new card", async ({ page }) => {
+  const title = uniqueTitle();
+  await addCard(page, 0, title);
+  const total = await page.locator('[data-testid^="card-"]').count();
+  await expect(page.getByLabel("Board summary")).toContainText(`${total}cards`);
+
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Recent activity" })).toContainText(
+    `Added card "${title}" to`
+  );
 });

@@ -1,15 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import clsx from "clsx";
-import { LogOut, Sparkles, SquareKanban } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
   PointerSensor,
   useSensor,
   useSensors,
-  closestCorners,
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
@@ -17,20 +14,33 @@ import { ChatSidebar } from "@/components/ChatSidebar";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import * as api from "@/lib/api";
-import { moveCard, type BoardData } from "@/lib/kanban";
+import { NameForm } from "@/components/BoardSwitcher";
+import { ActivityPanel } from "@/components/ActivityPanel";
+import { BoardStats } from "@/components/BoardStats";
+import { BoardToolbar } from "@/components/BoardToolbar";
+import {
+  columnFirstCollision,
+  filterBoard,
+  isFilterActive,
+  moveCard,
+  NO_FILTER,
+  type BoardData,
+  type CardChanges,
+} from "@/lib/kanban";
 
 type KanbanBoardProps = {
-  onLogout: () => void;
+  boardId: string;
+  isChatOpen: boolean;
+  onCloseChat: () => void;
 };
 
-export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
+// Mount with key={boardId}: switching boards then starts with fresh state and chat.
+export const KanbanBoard = ({ boardId, isChatOpen, onCloseChat }: KanbanBoardProps) => {
   const [board, setBoard] = useState<BoardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
-  // Open by default except on phone-sized screens, where it would cover the board.
-  const [isChatOpen, setIsChatOpen] = useState(
-    () => window.matchMedia("(min-width: 640px)").matches
-  );
+  const [isAddingColumn, setIsAddingColumn] = useState(false);
+  const [filter, setFilter] = useState(NO_FILTER);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -50,10 +60,10 @@ export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
 
   useEffect(() => {
     api
-      .getBoard()
+      .getBoard(boardId)
       .then(setBoard)
       .catch(() => setError("Could not load the board. Try reloading the page."));
-  }, []);
+  }, [boardId]);
 
   if (!board) {
     return error ? (
@@ -80,62 +90,36 @@ export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
     const columns = moveCard(board.columns, cardId, over.id as string);
     const column = columns.find((c) => c.cardIds.includes(cardId))!;
     setBoard({ ...board, columns });
-    save(api.moveCard(cardId, column.id, column.cardIds.indexOf(cardId)));
+    save(api.moveCard(boardId, cardId, column.id, column.cardIds.indexOf(cardId)));
   };
 
   const handleRenameColumn = (columnId: string, title: string) =>
-    save(api.renameColumn(columnId, title));
+    save(api.renameColumn(boardId, columnId, title));
+
+  const handleMoveColumn = (columnId: string, position: number) =>
+    save(api.moveColumn(boardId, columnId, position));
+
+  const handleDeleteColumn = (columnId: string) => save(api.deleteColumn(boardId, columnId));
+
+  const handleAddColumn = (title: string) => {
+    setIsAddingColumn(false);
+    save(api.createColumn(boardId, title));
+  };
 
   const handleAddCard = (columnId: string, title: string, details: string) =>
-    save(api.createCard(columnId, title, details));
+    save(api.createCard(boardId, columnId, title, details));
 
-  const handleEditCard = (cardId: string, title: string, details: string) =>
-    save(api.updateCard(cardId, title, details));
+  const handleEditCard = (cardId: string, changes: CardChanges) =>
+    save(api.updateCard(boardId, cardId, changes));
 
-  const handleDeleteCard = (cardId: string) => save(api.deleteCard(cardId));
+  const handleDeleteCard = (cardId: string) => save(api.deleteCard(boardId, cardId));
 
   const activeCard = activeCardId ? board.cards[activeCardId] : null;
+  const isFiltering = isFilterActive(filter);
+  const visible = filterBoard(board, filter);
 
   return (
-    <div className={clsx("flex h-dvh flex-col", isChatOpen && "sm:pr-[320px] 2xl:pr-[380px]")}>
-      <header className="flex items-center justify-between gap-4 border-b border-[var(--stroke)] bg-white px-4 py-3 sm:px-6">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--navy-dark)] text-[var(--accent-yellow)]">
-            <SquareKanban size={20} />
-          </span>
-          <div className="min-w-0">
-            <h1 className="font-display text-xl font-semibold leading-tight text-[var(--navy-dark)]">
-              Kanban Studio
-            </h1>
-            <p className="truncate text-xs text-[var(--gray-text)]">
-              {Object.keys(board.cards).length} cards across {board.columns.length} columns
-            </p>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {!isChatOpen && (
-            <button
-              type="button"
-              onClick={() => setIsChatOpen(true)}
-              aria-label="Open assistant"
-              className="flex items-center gap-2 rounded-full bg-[var(--secondary-purple)] px-3 py-2 text-xs font-semibold text-white transition hover:brightness-110"
-            >
-              <Sparkles size={14} />
-              <span className="hidden sm:inline">Open assistant</span>
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={onLogout}
-            aria-label="Log out"
-            className="flex items-center gap-2 rounded-full border border-[var(--stroke)] px-3 py-2 text-xs font-semibold text-[var(--gray-text)] transition hover:text-[var(--navy-dark)]"
-          >
-            <LogOut size={14} />
-            <span className="hidden sm:inline">Log out</span>
-          </button>
-        </div>
-      </header>
-
+    <>
       <main className="flex min-h-0 flex-1 flex-col gap-3 p-4">
         {error && (
           <p
@@ -146,24 +130,58 @@ export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
           </p>
         )}
 
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <BoardToolbar
+            filter={filter}
+            onChange={setFilter}
+            shown={visible.columns.reduce((sum, column) => sum + column.cardIds.length, 0)}
+            total={Object.keys(board.cards).length}
+          />
+          <div className="flex items-center gap-3">
+            <BoardStats board={board} />
+            <ActivityPanel boardId={boardId} board={board} />
+          </div>
+        </div>
+
+        {/* Positions in a filtered view are ambiguous, so dragging is off while filtering. */}
         <DndContext
-          sensors={sensors}
-          collisionDetection={closestCorners}
+          sensors={isFiltering ? [] : sensors}
+          collisionDetection={columnFirstCollision(board.columns)}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
           <section className="flex min-h-0 flex-1 snap-x gap-3 overflow-x-auto pb-1">
-            {board.columns.map((column) => (
+            {visible.columns.map((column, index) => (
               <KanbanColumn
                 key={column.id}
                 column={column}
                 cards={column.cardIds.map((cardId) => board.cards[cardId])}
+                isEmpty={board.columns[index].cardIds.length === 0}
+                index={index}
+                columnCount={board.columns.length}
                 onRename={handleRenameColumn}
+                onMove={handleMoveColumn}
+                onDelete={handleDeleteColumn}
                 onAddCard={handleAddCard}
                 onDeleteCard={handleDeleteCard}
                 onEditCard={handleEditCard}
               />
             ))}
+            <div className="w-[190px] shrink-0">
+              {isAddingColumn ? (
+                <div className="rounded-2xl border border-[var(--stroke)] bg-white p-3">
+                  <NameForm label="New column title" submitLabel="Add" onSubmit={handleAddColumn} />
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsAddingColumn(true)}
+                  className="w-full rounded-2xl border border-dashed border-[var(--stroke)] px-3 py-3 text-xs font-semibold uppercase tracking-wide text-[var(--primary-blue)] transition hover:border-[var(--primary-blue)]"
+                >
+                  + Add column
+                </button>
+              )}
+            </div>
           </section>
           <DragOverlay>
             {activeCard ? (
@@ -175,10 +193,11 @@ export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
         </DndContext>
       </main>
       <ChatSidebar
+        boardId={boardId}
         isOpen={isChatOpen}
-        onClose={() => setIsChatOpen(false)}
+        onClose={onCloseChat}
         onBoardChange={setBoard}
       />
-    </div>
+    </>
   );
 };

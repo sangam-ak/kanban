@@ -1,6 +1,6 @@
 # Kanban Studio
 
-Project management Kanban app with an AI chat sidebar. FastAPI backend serving a static Next.js frontend, in Docker.
+Project management app: user accounts, multiple Kanban boards, card priorities, due dates and labels, search and filters, an activity log, and an AI chat sidebar that can change the board. FastAPI backend serving a static Next.js frontend, in Docker.
 
 ## Run
 
@@ -20,4 +20,4 @@ powershell -ExecutionPolicy Bypass -File scripts\start.ps1
 powershell -ExecutionPolicy Bypass -File scripts\stop.ps1
 ```
 
-App runs at http://localhost:8000. Sign in with `user` / `password`.
+App runs at http://localhost:8000. Create an account, or sign in with the demo account `user` / `password`.

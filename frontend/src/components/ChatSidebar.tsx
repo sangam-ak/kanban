@@ -5,13 +5,14 @@ import * as api from "@/lib/api";
 import type { BoardData } from "@/lib/kanban";
 
 type ChatSidebarProps = {
+  boardId: string;
   isOpen: boolean;
   onClose: () => void;
   onBoardChange: (board: BoardData) => void;
 };
 
 // Stays mounted while closed so the conversation is kept.
-export const ChatSidebar = ({ isOpen, onClose, onBoardChange }: ChatSidebarProps) => {
+export const ChatSidebar = ({ boardId, isOpen, onClose, onBoardChange }: ChatSidebarProps) => {
   const [messages, setMessages] = useState<api.ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -35,7 +36,7 @@ export const ChatSidebar = ({ isOpen, onClose, onBoardChange }: ChatSidebarProps
     setError(null);
     setIsSending(true);
     try {
-      const reply = await api.chat(message, history);
+      const reply = await api.chat(boardId, message, history);
       setMessages((prev) => [...prev, { role: "assistant", content: reply.message }]);
       onBoardChange(reply.board);
     } catch {

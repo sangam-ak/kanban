@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+from datetime import date
 from typing import Literal
 
 from openai import ContentFilterFinishReasonError, LengthFinishReasonError, OpenAI
@@ -17,14 +18,23 @@ SYSTEM_PROMPT = """You are the assistant for a Kanban project management board.
 You help the user understand and manage their board, and you can change it.
 
 The current board is below as JSON. Columns are listed in order; each column's
-cardIds lists its cards from top to bottom. Card details are in "cards".
+cardIds lists its cards from top to bottom. Card details are in "cards": each card
+has a title, details, priority ("low", "medium", "high" or null), dueDate (ISO date
+"YYYY-MM-DD" or null) and labels (a list of short tags).
+
+Today's date is {today}.
 
 To change the board, add operations to "operations":
-- create_card: add a card to the end of a column (column_id, title, details)
-- update_card: change a card's title and/or details (card_id; null for a field you keep)
+- create_card: add a card to the end of a column (column_id, title, details; optional
+  priority, due_date, labels)
+- update_card: change a card (card_id, plus any of title, details, priority, due_date,
+  labels; null for a field you keep). labels replaces the card's whole label list.
 - move_card: move a card to a column at a 0-based position (card_id, column_id, position)
 - delete_card: remove a card (card_id)
+- create_column: add a column at the right end of the board (title)
 - rename_column: rename a column (column_id, title)
+- move_column: move a column to a 0-based position (column_id, position)
+- delete_column: remove a column; only works when it has no cards (column_id)
 Set every field an operation does not use to null.
 
 Rules:
@@ -45,12 +55,24 @@ class Operation(BaseModel):
     return operations that contradict the reply (e.g. delete_card when adding a card).
     """
 
-    type: Literal["create_card", "update_card", "move_card", "delete_card", "rename_column"]
+    type: Literal[
+        "create_card",
+        "update_card",
+        "move_card",
+        "delete_card",
+        "create_column",
+        "rename_column",
+        "move_column",
+        "delete_column",
+    ]
     card_id: str | None
     column_id: str | None
     title: str | None
     details: str | None
     position: int | None
+    priority: Literal["low", "medium", "high"] | None
+    due_date: str | None
+    labels: list[str] | None
 
 
 REQUIRED_FIELDS = {
@@ -58,8 +80,14 @@ REQUIRED_FIELDS = {
     "update_card": ("card_id",),
     "move_card": ("card_id", "column_id", "position"),
     "delete_card": ("card_id",),
+    "create_column": ("title",),
     "rename_column": ("column_id", "title"),
+    "move_column": ("column_id", "position"),
+    "delete_column": ("column_id",),
 }
+
+# Optional card fields an operation may set; null means "leave unchanged".
+CARD_EXTRAS = ("priority", "due_date", "labels")
 
 
 class ChatResponse(BaseModel):
@@ -96,15 +124,17 @@ def chat(messages: list[dict]) -> ChatResponse | None:
 
 
 def build_messages(board_data: dict, history: list[dict], message: str) -> list[dict]:
+    system = SYSTEM_PROMPT.replace("{today}", date.today().isoformat())
     return [
-        {"role": "system", "content": SYSTEM_PROMPT + json.dumps(board_data)},
+        {"role": "system", "content": system + json.dumps(board_data)},
         *history,
         {"role": "user", "content": message},
     ]
 
 
 def apply_operations(conn: sqlite3.Connection, board_id: int, operations: list[Operation]) -> int:
-    """Apply each operation; ones missing required fields or using unknown ids are skipped.
+    """Apply each operation; ones missing required fields, using unknown ids, deleting a
+    column that has cards or giving invalid field values are skipped.
 
     Returns the number of skipped operations.
     """
@@ -116,18 +146,29 @@ def apply_operations(conn: sqlite3.Connection, board_id: int, operations: list[O
         if any(getattr(op, field) is None for field in REQUIRED_FIELDS[op.type]):
             skipped += 1
             continue
+        extras = {name: getattr(op, name) for name in CARD_EXTRAS if getattr(op, name) is not None}
         try:
             match op.type:
                 case "create_card":
-                    board.create_card(conn, board_id, op.column_id, op.title, op.details or "")
+                    board.create_card(
+                        conn, board_id, op.column_id, op.title, op.details or "", **extras
+                    )
                 case "update_card":
-                    board.update_card(conn, board_id, op.card_id, op.title, op.details)
+                    changes = {"title": op.title, "details": op.details}
+                    changes = {k: v for k, v in changes.items() if v is not None} | extras
+                    board.update_card(conn, board_id, op.card_id, **changes)
                 case "move_card":
                     board.move_card(conn, board_id, op.card_id, op.column_id, op.position)
                 case "delete_card":
                     board.delete_card(conn, board_id, op.card_id)
+                case "create_column":
+                    board.create_column(conn, board_id, op.title)
                 case "rename_column":
                     board.rename_column(conn, board_id, op.column_id, op.title)
-        except board.NotFound:
+                case "move_column":
+                    board.move_column(conn, board_id, op.column_id, op.position)
+                case "delete_column":
+                    board.delete_column(conn, board_id, op.column_id)
+        except (board.NotFound, board.NotEmpty, ValueError):
             skipped += 1
     return skipped

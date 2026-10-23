@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,7 +12,10 @@ from app.main import app
 
 def op(type, **fields):
     """An operation with unused fields null, as the model returns them."""
-    empty = dict(card_id=None, column_id=None, title=None, details=None, position=None)
+    empty = dict(
+        card_id=None, column_id=None, title=None, details=None, position=None,
+        priority=None, due_date=None, labels=None,
+    )
     return Operation(type=type, **(empty | fields))
 
 
@@ -40,7 +44,7 @@ def fake_model(monkeypatch):
 
 
 def send(client, message="Hi", history=None):
-    return client.post("/api/chat", json={"message": message, "history": history or []})
+    return client.post("/api/boards/board-1/chat", json={"message": message, "history": history or []})
 
 
 def test_chat_requires_login():
@@ -49,14 +53,14 @@ def test_chat_requires_login():
 
 
 def test_reply_only_leaves_board_unchanged(client, fake_model):
-    before = client.get("/api/board").json()
+    before = client.get("/api/boards/board-1").json()
     response = send(client)
     assert response.status_code == 200
     assert response.json() == {"message": "Done.", "board": before}
 
 
 def test_messages_include_board_history_and_question(client, fake_model):
-    board = client.get("/api/board").json()
+    board = client.get("/api/boards/board-1").json()
     history = [
         {"role": "user", "content": "What is in Backlog?"},
         {"role": "assistant", "content": "Two cards."},
@@ -80,13 +84,16 @@ def test_create_card(client, fake_model):
 
 
 def test_update_card_keeps_null_fields(client, fake_model):
-    details = client.get("/api/board").json()["cards"]["card-1"]["details"]
+    details = client.get("/api/boards/board-1").json()["cards"]["card-1"]["details"]
     fake_model.response = ChatResponse(
         message="Renamed.",
         operations=[op("update_card", card_id="card-1", title="Renamed", details=None)],
     )
     card = send(client).json()["board"]["cards"]["card-1"]
-    assert card == {"id": "card-1", "title": "Renamed", "details": details}
+    assert card == {
+        "id": "card-1", "title": "Renamed", "details": details,
+        "priority": None, "dueDate": None, "labels": [],
+    }
 
 
 def test_move_card(client, fake_model):
@@ -151,8 +158,93 @@ def test_invalid_operations_are_skipped(client, fake_model):
     ]
 
 
+def test_chat_changes_only_the_requested_board(client, fake_model):
+    other = client.post("/api/boards", json={"name": "Second"}).json()["id"]
+    second = client.get(f"/api/boards/{other}").json()
+    backlog = second["columns"][0]["id"]
+    fake_model.response = ChatResponse(
+        message="Done.",
+        operations=[
+            op("create_card", column_id=backlog, title="On second", details=""),
+            # card-1 and col-1 belong to the demo board, so these are skipped.
+            op("delete_card", card_id="card-1"),
+            op("rename_column", column_id="col-1", title="Hijacked"),
+        ],
+    )
+    response = client.post(f"/api/boards/{other}/chat", json={"message": "Hi", "history": []})
+    assert response.json()["message"] == "Done.\n\n(2 changes could not be applied.)"
+    assert card_titles(response.json()["board"], "Backlog") == ["On second"]
+    demo = client.get("/api/boards/board-1").json()
+    assert "card-1" in demo["cards"]
+    assert demo["columns"][0]["title"] == "Backlog"
+    # The model saw the requested board, not the demo board.
+    assert backlog in fake_model.calls[-1][0]["content"]
+
+
+def test_create_card_with_fields(client, fake_model):
+    fake_model.response = ChatResponse(
+        message="Added.",
+        operations=[
+            op(
+                "create_card", column_id="col-1", title="Urgent", details="",
+                priority="high", due_date="2026-11-01", labels=["ops"],
+            )
+        ],
+    )
+    board = send(client).json()["board"]
+    card = board["cards"][column(board, "Backlog")["cardIds"][-1]]
+    assert (card["priority"], card["dueDate"], card["labels"]) == ("high", "2026-11-01", ["ops"])
+
+
+def test_update_card_fields_keeps_title(client, fake_model):
+    fake_model.response = ChatResponse(
+        message="Updated.",
+        operations=[op("update_card", card_id="card-1", priority="low", labels=["a", "b"])],
+    )
+    card = send(client).json()["board"]["cards"]["card-1"]
+    assert card["title"] == "Align roadmap themes"
+    assert (card["priority"], card["labels"]) == ("low", ["a", "b"])
+
+
+def test_column_operations(client, fake_model):
+    client.delete("/api/boards/board-1/cards/card-3")  # empties Discovery (col-2)
+    fake_model.response = ChatResponse(
+        message="Reorganised.",
+        operations=[
+            op("create_column", title="Blocked"),
+            op("move_column", column_id="col-5", position=0),
+            op("delete_column", column_id="col-2"),
+        ],
+    )
+    board = send(client).json()["board"]
+    assert [c["title"] for c in board["columns"]] == [
+        "Done", "Backlog", "In Progress", "Review", "Blocked",
+    ]
+
+
+def test_invalid_new_operations_are_skipped(client, fake_model):
+    fake_model.response = ChatResponse(
+        message="Tried.",
+        operations=[
+            op("delete_column", column_id="col-1"),  # has cards
+            op("update_card", card_id="card-1", due_date="tomorrow"),
+            op("create_column", title=" "),
+            op("move_column", column_id="col-1"),  # no position
+        ],
+    )
+    response = send(client).json()
+    assert response["message"] == "Tried.\n\n(4 changes could not be applied.)"
+    assert len(response["board"]["columns"]) == 5
+    assert response["board"]["cards"]["card-1"]["dueDate"] is None
+
+
+def test_system_prompt_includes_today(client, fake_model):
+    send(client)
+    assert date.today().isoformat() in fake_model.calls[-1][0]["content"]
+
+
 def test_blank_titles_are_treated_as_missing(client, fake_model):
-    before = client.get("/api/board").json()
+    before = client.get("/api/boards/board-1").json()
     fake_model.response = ChatResponse(
         message="Tried.",
         operations=[
@@ -177,7 +269,7 @@ def test_one_skipped_operation_is_reported(client, fake_model):
 
 
 def test_unusable_reply_leaves_board_unchanged(client, fake_model):
-    before = client.get("/api/board").json()
+    before = client.get("/api/boards/board-1").json()
     fake_model.response = None
     response = send(client)
     assert response.status_code == 200
@@ -188,7 +280,7 @@ def test_unusable_reply_leaves_board_unchanged(client, fake_model):
 
 
 def test_operations_missing_required_fields_are_skipped(client, fake_model):
-    before = client.get("/api/board").json()
+    before = client.get("/api/boards/board-1").json()
     fake_model.response = ChatResponse(
         message="Tried.",
         operations=[
@@ -206,7 +298,7 @@ def test_ai_changes_persist(client, fake_model):
         message="Deleted.", operations=[op("delete_card", card_id="card-1")]
     )
     send(client)
-    assert "card-1" not in client.get("/api/board").json()["cards"]
+    assert "card-1" not in client.get("/api/boards/board-1").json()["cards"]
 
 
 def test_rejects_empty_message(client, fake_model):
@@ -236,7 +328,7 @@ def test_real_ai_moves_card(client):
 
 @real_ai
 def test_real_ai_answers_without_changes(client):
-    before = client.get("/api/board").json()
+    before = client.get("/api/boards/board-1").json()
     response = send(client, "How many cards are in the Review column? Do not change anything.")
     assert "1" in response.json()["message"] or "one" in response.json()["message"].lower()
     assert response.json()["board"] == before
